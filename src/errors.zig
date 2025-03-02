@@ -4,7 +4,7 @@ const std = @import("std");
 /// Callback for when an SDL error occurs.
 ///
 /// This is per-thread.
-threadlocal var error_callback: ?*const fn (
+pub threadlocal var error_callback: ?*const fn (
     err: ?[]const u8,
 ) void = null;
 
@@ -139,6 +139,53 @@ pub fn wrapCallBool(
     _ = try wrapCall(bool, result, false);
 }
 
+/// Unwrap a C pointer.
+///
+/// It is safe to call this function from any thread.
+///
+/// This is provided by zig-sdl3.
+pub fn wrapCallCPtr(
+    comptime Result: type,
+    result: [*c]Result,
+) ![*]Result {
+    if (result) |val|
+        return val;
+    if (@This().error_callback) |cb| {
+        cb(get());
+    }
+    return error.SdlError;
+}
+
+/// Unwrap a C pointer to a constant.
+///
+/// It is safe to call this function from any thread.
+///
+/// This is provided by zig-sdl3.
+pub fn wrapCallCPtrConst(
+    comptime Result: type,
+    result: [*c]const Result,
+) ![*]const Result {
+    if (result) |val|
+        return val;
+    if (@This().error_callback) |cb| {
+        cb(get());
+    }
+    return error.SdlError;
+}
+
+/// Unwrap a C string.
+///
+/// It is safe to call this function from any thread.
+///
+/// This is provided by zig-sdl3.
+pub fn wrapCallCString(
+    result: [*c]const u8,
+) ![]const u8 {
+    if (result != null)
+        return std.mem.span(result);
+    return error.SdlError;
+}
+
 /// Wrap an SDL call that returns success if not null.
 /// Returns an error if the result is null, otherwise unwraps it.
 ///
@@ -169,12 +216,29 @@ test "Error" {
     try std.testing.expectEqualStrings("Hello world", get().?);
     try std.testing.expectError(error.SdlError, unsupported());
     try std.testing.expectEqualStrings("That operation is not supported", get().?);
+
+    const val1: u8 = 5;
+    var val2: u8 = 7;
+    const c_ptr1: [*c]const u8 = &val1;
+    const c_ptr2: [*c]u8 = &val2;
+    try std.testing.expectEqual(@as([*]const u8, @ptrCast(&val1)), try wrapCallCPtrConst(u8, c_ptr1));
+    try std.testing.expectError(error.SdlError, wrapCallCPtrConst(u8, null));
+    try std.testing.expectEqual(@as([*]u8, @ptrCast(&val2)), try wrapCallCPtr(u8, c_ptr2));
+    try std.testing.expectError(error.SdlError, wrapCallCPtr(u8, null));
+
+    const c_str: [*c]const u8 = "C string unwrap test";
+    try std.testing.expectEqualStrings("C string unwrap test", try wrapCallCString(c_str));
+    try std.testing.expectError(error.SdlError, wrapCallCString(null));
+
     try std.testing.expectEqual(0, try wrapCall(u8, 0, 1));
     try std.testing.expectError(error.SdlError, wrapCall(u8, 1, 1));
+
     try wrapCallBool(true);
     try std.testing.expectError(error.SdlError, wrapCallBool(false));
+
     _ = try wrapNull(i32, 3);
     try std.testing.expectError(error.SdlError, wrapNull(i32, null));
+
     clear();
     try std.testing.expectEqual(null, get());
 }

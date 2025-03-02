@@ -1,5 +1,6 @@
 const C = @import("c.zig").C;
 const errors = @import("errors.zig");
+const pixels = @import("pixels.zig");
 const properties = @import("properties.zig");
 const rect = @import("rect.zig");
 const std = @import("std");
@@ -11,43 +12,53 @@ pub const SystemTheme = enum(c_uint) {
     Dark = C.SDL_SYSTEM_THEME_DARK,
 };
 
-/// Display orientation values; the way a display is rotated.
-pub const DisplayOrientation = enum(c_uint) {
-    /// The display is in landscape mode, with the right side up, relative to portrait mode.
-    Landscape = C.SDL_ORIENTATION_LANDSCAPE,
-    /// The display is in landscape mode, with the left side up, relative to portrait mode.
-    LandscapeFlipped = C.SDL_ORIENTATION_LANDSCAPE_FLIPPED,
-    /// The display is in portrait mode.
-    Portrait = C.SDL_ORIENTATION_PORTRAIT,
-    /// The display is in portrait mode, upside down.
-    PortraitFlipped = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
-};
-
-/// A display.
-pub const Display = struct {
+/// This is a unique for a display for the time it is connected to the system, and is never reused for the lifetime of the application.
+///
+/// ## Remarks
+/// If the display is disconnected and reconnected, it will get a new ID.
+///
+/// ## Version
+/// This datatype is available since SDL 3.2.0.
+pub const Display = packed struct {
     value: C.SDL_DisplayID,
 
-    /// Return the primary display.
-    pub fn getPrimaryDisplay() !Display {
-        const ret = C.SDL_GetPrimaryDisplay();
-        if (ret == 0)
-            return error.SdlError;
-        return Display{ .value = ret };
-    }
+    /// Display properties.
+    ///
+    /// ## Version
+    /// Provided by zig-sdl3.
+    pub const Properties = struct {
+        /// True if the display has HDR headroom above the SDR white point.
+        /// This is for informational and diagnostic purposes only, as not all platforms provide this information at the display level.
+        hdr_enabled: ?bool,
+        /// The "panel orientation" property for the display in degrees of clockwise rotation.
+        /// Note that this is provided only as a hint, and the application is responsible for any coordinate transformations needed to conform to the requested display orientation.
+        kmsdrm_panel_orientation: ?i64,
 
-    /// Get the name of a display in UTF-8 encoding.
-    pub fn getName(
-        self: Display,
-    ) ![]const u8 {
-        const ret = C.SDL_GetDisplayName(
-            self.value,
-        );
-        if (ret == null)
-            return error.SdlError;
-        return std.mem.span(ret);
-    }
+        /// Get properties from SDL.
+        pub fn fromSdl(props: properties.Group) Properties {
+            return .{
+                .hdr_enabled = if (props.get(C.SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN)) |val| val.Boolean else null,
+                .kmsdrm_panel_orientation = if (props.get(C.SDL_PROP_DISPLAY_KMSDRM_PANEL_ORIENTATION_NUMBER)) |val| val.Number else null,
+            };
+        }
+    };
 
     /// Get the desktop area represented by a display.
+    ///
+    /// ## Function Parameters
+    /// * `self`: The display to query.
+    ///
+    /// ## Return Value
+    /// The rectangle filled in with the display bounds.
+    ///
+    /// ## Remarks
+    /// The primary display is often located at (0,0), but may be placed at a different location depending on monitor layout.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
     pub fn getBounds(
         self: Display,
     ) !rect.IRect {
@@ -56,9 +67,212 @@ pub const Display = struct {
             self.value,
             &area,
         );
-        if (!ret)
+        try errors.wrapCallBool(ret);
+        return rect.IRect.fromSdl(area);
+    }
+
+    /// Get the closest match to the requested display mode.
+    ///
+    /// ## Function Parameters
+    /// * `self`: h
+    /// * `width`: h
+    /// * `height`: h
+    /// * `refresh_rate`: h
+    /// * `include_high_density_modes`: h
+    ///
+    /// ## Return Value
+    /// A display mode with the closest display mode equal to or larger than the desired mode.
+    /// Will return an error if any mode could not be found, or all modes are smaller.
+    ///
+    /// ## Remarks
+    /// The available display modes are scanned and closest is filled in with the closest mode matching the requested mode and returned.
+    /// The mode format and refresh rate default to the desktop mode if they are set to 0.
+    /// The modes are scanned with size being first priority, format being second priority, and finally checking the refresh rate.
+    /// If all the available modes are too small, then an error is returned.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getClosestFullscreenMode(
+        self: Display,
+        width: usize,
+        height: usize,
+        refresh_rate: f32,
+        include_high_density_modes: bool,
+    ) !DisplayMode {
+        var mode: C.SDL_DisplayMode = undefined;
+        const ret = C.SDL_GetClosestFullscreenDisplayMode(
+            self.value,
+            @intCast(width),
+            @intCast(height),
+            refresh_rate,
+            include_high_density_modes,
+            &mode,
+        );
+        try errors.wrapCallBool(ret);
+        return DisplayMode.fromSdl(mode);
+    }
+
+    /// Get the content scale of a display.
+    ///
+    /// ## Function Parameters
+    /// * `self`: The display to query.
+    ///
+    /// ## Return Value
+    /// Returns the content scale of the display.
+    ///
+    /// ## Remarks
+    /// The content scale is the expected scale for content based on the DPI settings of the display.
+    /// For example, a 4K display might have a 2.0 (200%) display scale,
+    /// which means that the user expects UI elements to be twice as big on this display, to aid in readability.
+    ///
+    /// After window creation, `video.Window.getDisplayScale()` should be used to query the content scale factor
+    /// for individual windows instead of querying the display for a window and calling this function,
+    /// as the per-window content scale factor may differ from the base value of the display it is on,
+    /// particularly on high-DPI and/or multi-monitor desktop configurations.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getContentScale(
+        self: Display,
+    ) !f32 {
+        const ret = C.SDL_GetDisplayContentScale(
+            self.value,
+        );
+        return errors.wrapCall(f32, ret, 0.0);
+    }
+
+    /// Get information about the current display mode.
+    ///
+    /// ## Function Parameters
+    /// * `self`: The display to query.
+    ///
+    /// ## Return Value
+    /// Returns the desktop display mode.
+    ///
+    /// ## Remarks
+    /// There's a difference between this function and `video.Display.getDesktopMode()` when SDL runs fullscreen and has changed the resolution.
+    /// In that case this function will return the current display mode, and not the previous native display mode.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getCurrentMode(
+        self: Display,
+    ) !DisplayMode {
+        const ret = C.SDL_GetCurrentDisplayMode(self.value);
+        const mode = try errors.wrapNull(C.SDL_DisplayMode, ret);
+        return DisplayMode.fromSdl(mode);
+    }
+
+    /// Get the orientation of a display.
+    ///
+    /// ## Function Parameters
+    /// * `self`: The display to query.
+    ///
+    /// ## Return Value
+    /// Returns the orientation value of the display.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getCurrentOrientation(
+        self: Display,
+    ) ?DisplayOrientation {
+        const ret = C.SDL_GetCurrentDisplayOrientation(
+            self.value,
+        );
+        return DisplayOrientation.fromSdl(ret);
+    }
+
+    /// Get information about the desktop's display mode.
+    ///
+    /// ## Function Parameter
+    /// * `self`: The display to query.
+    ///
+    /// ## Return Value
+    /// Returns the desktop display mode.
+    ///
+    /// ## Remarks
+    /// There's a difference between this function and `video.Display.getCurrentMode()` when SDL runs fullscreen and has changed the resolution.
+    /// In that case this function will return the previous native display mode, and not the current display mode.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getDesktopMode(
+        self: Display,
+    ) !DisplayMode {
+        const ret = C.SDL_GetDesktopDisplayMode(self.value);
+        const val = try errors.wrapCallCPtrConst(C.SDL_DisplayMode, ret);
+        return DisplayMode.fromSdl(val.*);
+    }
+
+    /// Get the name of a display in UTF-8 encoding.
+    ///
+    /// ## Function Parameters
+    /// * `self` - The display to query.
+    ///
+    /// ## Return Value
+    /// Returns the name of a display.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    ///
+    /// ## Code Examples
+    /// TODO!!!
+    pub fn getName(
+        self: Display,
+    ) ![]const u8 {
+        const ret = C.SDL_GetDisplayName(
+            self.value,
+        );
+        return try errors.wrapCallCString(ret);
+    }
+
+    /// Get the properties associated with a display.
+    ///
+    /// ## Function Parameters
+    /// * `self` - The display to query.
+    ///
+    /// ## Return Value
+    /// Returns the display properties.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    ///
+    /// ## Code Examples
+    /// TODO!!!
+    pub fn getProperties(
+        self: Display,
+    ) !Properties {
+        const ret = C.SDL_GetDisplayProperties(self.value);
+        return Properties.fromSdl(properties.Group{ .value = try errors.wrapCall(C.SDL_PropertiesID, ret, 0) });
+    }
+
+    /// Return the primary display.
+    pub fn getPrimaryDisplay() !Display {
+        const ret = C.SDL_GetPrimaryDisplay();
+        if (ret == 0)
             return error.SdlError;
-        return ret.fromSdl();
+        return Display{ .value = ret };
     }
 
     /// Get the usable desktop area represented by a display, in screen coordinates.
@@ -87,30 +301,6 @@ pub const Display = struct {
         return @enumFromInt(ret);
     }
 
-    /// Get the orientation of a display.
-    pub fn getCurrentOrientation(
-        self: Display,
-    ) ?DisplayOrientation {
-        const ret = C.SDL_GetCurrentDisplayOrientation(
-            self.value,
-        );
-        if (ret == C.SDL_ORIENTATION_UNKNOWN)
-            return null;
-        return @enumFromInt(ret);
-    }
-
-    /// Get the content scale of a display.
-    pub fn getContentScale(
-        self: Display,
-    ) !f32 {
-        const ret = C.SDL_GetDisplayContentScale(
-            self.value,
-        );
-        if (ret == 0.0)
-            return error.SdlError;
-        return @floatCast(ret);
-    }
-
     /// Get a list of currently connected displays.
     pub fn getAll(allocator: std.mem.Allocator) ![]Display {
         var count: c_int = undefined;
@@ -123,6 +313,308 @@ pub const Display = struct {
             converted_ret[index].value = ret[index];
         }
         return converted_ret;
+    }
+};
+
+/// The structure that defines a display mode.
+///
+/// ## Version
+/// This struct is available since SDL 3.2.0.
+pub const DisplayMode = struct {
+    /// The display this mode is associated with.
+    display: ?Display,
+    /// Pixel format.
+    format: ?pixels.Format,
+    /// Width.
+    width: usize,
+    /// Height.
+    height: usize,
+    /// Scale converting size to pixels (e.g. a 1920x1080 mode with 2.0 scale would have 3840x2160 pixels).
+    pixel_density: f32,
+    /// Refresh rate (or 0.0f for unspecified).
+    refresh_rate: f32,
+    /// Precise refresh rate numerator (or 0 for unspecified).
+    refresh_rate_numerator: u32,
+    /// Precise refresh rate denominator.
+    refresh_rate_denominator: u32,
+
+    /// Convert from SDL.
+    pub fn fromSdl(mode: C.SDL_DisplayMode) DisplayMode {
+        return .{
+            .display = Display.fromSdl(mode.displayID),
+            .format = pixels.Format.fromSdl(mode.format),
+            .width = @intCast(mode.w),
+            .height = @intCast(mode.h),
+            .pixel_density = mode.pixel_density,
+            .refresh_rate = mode.refresh_rate,
+            .refresh_rate_numerator = @intCast(mode.refresh_rate_numerator),
+            .refresh_rate_denominator = @intCast(mode.refresh_rate_denominator),
+        };
+    }
+
+    /// Convert to SDL.
+    pub fn toSdl(self: DisplayMode) C.SDL_DisplayMode {
+        return .{
+            .displayID = Display.toSdl(self.display),
+            .format = pixels.Format.toSdl(self.format),
+            .w = @intCast(self.width),
+            .h = @intCast(self.height),
+            .pixel_density = self.pixel_density,
+            .refresh_rate = self.refresh_rate,
+            .refresh_rate_numerator = @intCast(self.refresh_rate_numerator),
+            .refresh_rate_denominator = @intCast(self.refresh_rate_denominator),
+        };
+    }
+};
+
+/// Display orientation values; the way a display is rotated.
+///
+/// ## Version
+/// This enum is available since SDL 3.2.0.
+pub const DisplayOrientation = enum(c_uint) {
+    /// The display is in landscape mode, with the right side up, relative to portrait mode.
+    Landscape = C.SDL_ORIENTATION_LANDSCAPE,
+    /// The display is in landscape mode, with the left side up, relative to portrait mode.
+    LandscapeFlipped = C.SDL_ORIENTATION_LANDSCAPE_FLIPPED,
+    /// The display is in portrait mode.
+    Portrait = C.SDL_ORIENTATION_PORTRAIT,
+    /// The display is in portrait mode, upside down.
+    PortraitFlipped = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
+
+    /// Convert from SDL.
+    pub fn fromSdl(val: C.SDL_DisplayOrientation) ?DisplayOrientation {
+        return switch (val) {
+            C.SDL_ORIENTATION_LANDSCAPE => .Landscape,
+            C.SDL_ORIENTATION_LANDSCAPE_FLIPPED => .LandscapeFlipped,
+            C.SDL_ORIENTATION_PORTRAIT => .Portrait,
+            C.SDL_ORIENTATION_PORTRAIT_FLIPPED => .PortraitFlipped,
+            else => null,
+        };
+    }
+
+    /// Convert to an SDL value.
+    pub fn toSdl(self: ?DisplayOrientation) C.SDL_DisplayOrientation {
+        const val = self orelse return C.SDL_ORIENTATION_UNKNOWN;
+        switch (val) {
+            .Landscape => C.SDL_ORIENTATION_LANDSCAPE,
+            .LandscapeFlipped => C.SDL_ORIENTATION_LANDSCAPE_FLIPPED,
+            .Portrait => C.SDL_ORIENTATION_PORTRAIT,
+            .PortraitFlipped => C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
+        }
+    }
+};
+
+/// Wrapper for EGL related functions.
+///
+/// ## Version
+/// Provided by zig-sdl3.
+pub const egl = struct {
+    /// An EGL attribute, used when creating an EGL context.
+    ///
+    /// ## Version
+    /// This datatype is available since SDL 3.2.0.
+    pub const EglAttrib = C.SDL_EGLAttrib;
+
+    /// EGL platform attribute initialization callback.
+    ///
+    /// ## Function Parameters
+    /// * `user_data`: An app-controlled pointer that is passed to the callback.
+    ///
+    /// ## Return Value.
+    /// Returns a newly-allocated array of attributes, terminated with `EGL_NONE`.
+    ///
+    /// ## Remarks
+    /// This is called when SDL is attempting to create an EGL context, to let the app add extra attributes to its `eglGetPlatformDisplay()` call.
+    ///
+    /// The callback should return a pointer to an EGL attribute array terminated with `EGL_NONE`.
+    /// If this function returns `null`, the `video.createWindow()` process will fail gracefully.
+    ///
+    /// The returned pointer should be allocated with `stdinc.malloc()` and will be passed to `stdinc.free()`.
+    ///
+    /// The arrays returned by each callback will be appended to the existing attribute arrays defined by SDL.
+    ///
+    /// ## Version
+    /// This datatype is available since SDL 3.2.0.
+    pub const EglAttribArrayCallback = *const fn (user_data: ?*anyopaque) callconv(.C) [*c]EglAttrib;
+
+    /// Opaque type for an EGL config.
+    ///
+    /// ## Version
+    /// This datatype is available since SDL 3.2.0.
+    pub const EglConfig = *anyopaque;
+
+    /// Opaque type for an EGL display.
+    ///
+    /// ## Version
+    /// This datatype is available since SDL 3.2.0.
+    pub const EglDisplay = *anyopaque;
+
+    /// An EGL integer attribute, used when creating an EGL surface.
+    ///
+    /// ## Version
+    /// This datatype is available since SDL 3.2.0.
+    pub const EglInt = C.SDL_EGLint;
+
+    /// EGL surface/context attribute initialization callback types.
+    ///
+    /// ## Function Parameters
+    /// * `user_data`: An app-controlled pointer that is passed to the callback.
+    /// * `display`: The EGL display to be used.
+    /// * `config`: The EGL config to be used.
+    ///
+    /// ## Return Value
+    /// Returns a newly-allocated array of attributes, terminated with `EGL_NONE`.
+    ///
+    /// ## Remarks
+    /// This is called when SDL is attempting to create an EGL surface, to let the app add extra attributes to its `eglCreateWindowSurface()` or `eglCreateContext()` calls.
+    ///
+    /// For convenience, the `EGLDisplay` and `EGLConfig` to use are provided to the callback.
+    ///
+    /// The callback should return a pointer to an EGL attribute array terminated with `EGL_NONE`.
+    /// If this function returns `null`, the SDL_CreateWindow process will fail gracefully.
+    ///
+    /// The returned pointer should be allocated with `stdinc.malloc()` and will be passed to `stdinc.free()`.
+    ///
+    /// The arrays returned by each callback will be appended to the existing attribute arrays defined by SDL.
+    ///
+    /// ## Version
+    /// This datatype is available since SDL 3.2.0.
+    pub const EglIntArrayCallback = *const fn (user_data: ?*anyopaque, display: C.SDL_EGLDisplay, config: C.SDL_EGLConfig) callconv(.C) [*c]EglInt;
+
+    /// Opaque type for an EGL surface.
+    ///
+    /// ## Version
+    /// This datatype is available since SDL 3.2.0.
+    pub const EglSurface = *anyopaque;
+
+    /// Get the currently active EGL config.
+    ///
+    /// ## Return Value
+    /// Returns the currently active EGL config.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getCurrentConfig() !EglConfig {
+        const ret = C.SDL_EGL_GetCurrentConfig();
+        return errors.wrapNull(EglConfig, ret);
+    }
+
+    /// Get the currently active EGL display.
+    ///
+    /// ## Return Value
+    /// Returns the currently active EGL display.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getCurrentDisplay() !EglDisplay {
+        const ret = C.SDL_EGL_GetCurrentDisplay();
+        return errors.wrapNull(EglDisplay, ret);
+    }
+
+    /// Get an EGL library function by name.
+    ///
+    /// ## Function Parameters
+    /// * `proc`: The name of the EGL function.
+    ///
+    /// ## Return Value
+    /// Returns a pointer to the named EGL function.
+    /// The returned pointer should be cast to the appropriate function signature.
+    ///
+    /// ## Remarks
+    /// If an EGL library is loaded, this function allows applications to get entry points for EGL functions.
+    /// This is useful to provide to an EGL API and extension loader.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getProcAddress(
+        proc: [:0]const u8,
+    ) !*anyopaque {
+        const ret = C.SDL_EGL_GetProcAddress(proc.ptr);
+        return errors.wrapNull(*anyopaque, ret);
+    }
+
+    /// Get the EGL surface associated with the window.
+    ///
+    /// ## Function Parameters
+    /// * `window`: The window to query.
+    ///
+    /// ## Return value.
+    /// Returns the pointer to the surface.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getWindowSurface(
+        window: Window,
+    ) !EglSurface {
+        const ret = C.SDL_EGL_GetWindowSurface(window.value);
+        return errors.wrapNull(EglSurface, ret);
+    }
+
+    /// Sets the callbacks for defining custom `EGLAttrib` arrays for EGL initialization.
+    ///
+    /// ## Function Parameters
+    /// * `platform_attrib_callback`: Callback for attributes to pass to `eglGetPlatformDisplay()`. May be `null`.
+    /// * `surface_attrib_callback`: Callback for attributes to pass to `eglCreateSurface()`. May be `null`.
+    /// * `context_attrib_callback`: Callback for attributes to pass to `eglCreateContext()`. May be `null`.
+    /// * `user_data`: A pointer that is passed to the callbacks.
+    ///
+    /// ## Remarks
+    /// Callbacks that aren't needed can be set to `null`.
+    ///
+    /// NOTE: These callback pointers will be reset after `video.gl.resetAttributes()`.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn setAttributeCallbacks(
+        platform_attrib_callback: ?EglAttribArrayCallback,
+        surface_attrib_callback: ?EglIntArrayCallback,
+        context_attrib_callback: ?EglIntArrayCallback,
+        user_data: ?*anyopaque,
+    ) void {
+        C.SDL_EGL_SetAttributeCallbacks(
+            platform_attrib_callback,
+            surface_attrib_callback,
+            context_attrib_callback,
+            user_data,
+        );
+    }
+};
+
+/// Window flash operation.
+///
+/// ## Version
+/// This enum is available since SDL 3.2.0.
+pub const FlashOperation = enum(c_uint) {
+    /// Cancel any window flash state.
+    Cancel = C.SDL_FLASH_CANCEL,
+    /// Flash the window briefly to get attention
+    Briefly = C.SDL_FLASH_BRIEFLY,
+    /// Flash the window until it gets focus
+    UntilFocused = C.SDL_FLASH_UNTIL_FOCUSED,
+
+    /// Convert from SDL.
+    pub fn fromSdl(val: C.SDL_FlashOperation) FlashOperation {
+        return @enumFromInt(val);
+    }
+
+    /// Convert to SDL.
+    pub fn toSdl(self: FlashOperation) C.SDL_FlashOperation {
+        return @intFromEnum(self);
     }
 };
 
@@ -225,6 +717,70 @@ pub const Window = packed struct {
             const ret = try properties.Group.init();
             if (self.always_on_top) |val|
                 ret.set(C.SDL_PROP_WINDOW_CREATE_ALWAYS_ON_TOP_BOOLEAN, .{ .Boolean = val });
+            if (self.borderless) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_BORDERLESS_BOOLEAN, .{ .Boolean = val });
+            if (self.external_graphics_context) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN, .{ .Boolean = val });
+            if (self.focusable) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_FOCUSABLE_BOOLEAN, .{ .Boolean = val });
+            if (self.fullscreen) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, .{ .Boolean = val });
+            if (self.height) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, .{ .Number = @intCast(val) });
+            if (self.hidden) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, .{ .Boolean = val });
+            if (self.high_pixel_density) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, .{ .Boolean = val });
+            if (self.maximized) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_MAXIMIZED_BOOLEAN, .{ .Boolean = val });
+            if (self.menu) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_MENU_BOOLEAN, .{ .Boolean = val });
+            if (self.metal) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_METAL_BOOLEAN, .{ .Boolean = val });
+            if (self.minimized) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_MINIMIZED_BOOLEAN, .{ .Boolean = val });
+            if (self.modal) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_MODAL_BOOLEAN, .{ .Boolean = val });
+            if (self.mouse_grabbed) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_MOUSE_GRABBED_BOOLEAN, .{ .Boolean = val });
+            if (self.open_gl) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, .{ .Boolean = val });
+            if (self.parent) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_PARENT_POINTER, .{ .Pointer = val.value });
+            if (self.resizable) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, .{ .Boolean = val });
+            if (self.title) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_TITLE_STRING, .{ .String = val });
+            if (self.transparent) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN, .{ .Boolean = val });
+            if (self.tooltip) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_TOOLTIP_BOOLEAN, .{ .Boolean = val });
+            if (self.utility) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_UTILITY_BOOLEAN, .{ .Boolean = val });
+            if (self.vulkan) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, .{ .Boolean = val });
+            if (self.width) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, .{ .Number = @intCast(val) });
+            if (self.x) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_X_NUMBER, .{ .Number = @intCast(val.toSdl()) });
+            if (self.y) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_Y_NUMBER, .{ .Number = @intCast(val.toSdl()) });
+            if (self.cocoa_window) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_COCOA_WINDOW_POINTER, .{ .Pointer = val });
+            if (self.cocoa_view) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_COCOA_VIEW_POINTER, .{ .Pointer = val });
+            if (self.wayland_surface_role_custom) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN, .{ .Boolean = val });
+            if (self.wayland_create_egl_window) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_WAYLAND_CREATE_EGL_WINDOW_BOOLEAN, .{ .Boolean = val });
+            if (self.wayland_create_wl_surface) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_WAYLAND_WL_SURFACE_POINTER, .{ .Pointer = val });
+            if (self.win32_hwnd) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_WIN32_HWND_POINTER, .{ .Pointer = val });
+            if (self.win32_pixel_format_hwnd) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_WIN32_PIXEL_FORMAT_HWND_POINTER, .{ .Pointer = val });
+            if (self.x11_window) |val|
+                ret.set(C.SDL_PROP_WINDOW_CREATE_X11_WINDOW_NUMBER, .{ .Number = @intCast(val) });
             return ret;
         }
     };
@@ -235,11 +791,22 @@ pub const Window = packed struct {
     /// This union is provided without zig-sdl3.
     pub const Position = union(enum) {
         /// Specify the absolute position of the window.
-        absolute: ?i32,
+        absolute: i32,
         /// Center the window on the display.
         centered: void,
         /// Put the window wherever I guess.
         undefined: void,
+
+        /// Convert to the SDL representation.
+        pub fn toSdl(
+            self: Position,
+        ) c_int {
+            return switch (self) {
+                .absolute => |val| @intCast(val),
+                .centered => C.SDL_WINDOWPOS_CENTERED,
+                .undefined => C.SDL_WINDOWPOS_UNDEFINED,
+            };
+        }
     };
 
     /// Create a child popup window of the specified parent window.
@@ -252,7 +819,7 @@ pub const Window = packed struct {
     /// * `height`: The height of the window.
     /// * `flags`: Window flags that must contain `tooltip` or `popup_menu`.
     ///
-    /// ## Returns
+    /// ## Return Value
     /// Returns the window created.
     ///
     /// ## Remarks
@@ -306,6 +873,66 @@ pub const Window = packed struct {
         return .{
             .value = try errors.wrapNull(*C.SDL_Window, ret),
         };
+    }
+
+    /// Destroy a window.
+    ///
+    /// ## Function Parameters
+    /// * `self`: The window to destroy.
+    ///
+    /// ## Remarks
+    /// Any child windows owned by the window will be recursively destroyed as well.
+    ///
+    /// Note that on some platforms, the visible window may not actually be removed from the screen until the SDL event loop is pumped again,
+    /// even though the `video.Window` is no longer valid after this call.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn deinit(
+        self: Window,
+    ) void {
+        C.SDL_DestroyWindow(
+            self.value,
+        );
+    }
+
+    /// Destroy the surface associated with the window.
+    ///
+    /// ## Function Parameters
+    /// * `self`: The window to update.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn destroySurface(
+        self: Window,
+    ) !void {
+        const ret = C.SDL_DestroyWindowSurface(self.value);
+        return errors.wrapCallBool(ret);
+    }
+
+    /// Request a window to demand attention from the user.
+    ///
+    /// ## Function parameters
+    /// * `self`: The window to be flashed.
+    /// * `operation`: The operation to perform.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn flash(
+        self: Window,
+        operation: FlashOperation,
+    ) !void {
+        const ret = C.SDL_FlashWindow(self.value, operation.toSdl());
+        return errors.wrapCallBool(ret);
     }
 
     /// Create a window with the specified dimensions and flags.
@@ -396,6 +1023,43 @@ pub const Window = packed struct {
         };
     }
 
+    /// Create a window with the specified properties.
+    ///
+    /// ## Function Parameters
+    /// * `props`: The properties to use.
+    ///
+    /// ## Return Value
+    /// Returns the window that was created along with a properties group that you must free with `properties.Group.deinit()`.
+    ///
+    /// ## Remarks
+    /// The window is implicitly shown if the "hidden" property is not set.
+    ///
+    /// Windows with the "tooltip" and "menu" properties are popup windows and have the behaviors and guidelines outlined in `video.Window.createPopup()`.
+    ///
+    /// If this window is being created to be used with a `video.Renderer`, you should not add a graphics API specific property (`video.Window.CreateProperites.open_gl`, etc),
+    /// as SDL will handle that internally when it chooses a renderer.
+    /// However, SDL might need to recreate your window at that point, which may cause the window to appear briefly, and then flicker as it is recreated.
+    /// The correct approach to this is to create the window with the `video.Window.CreateProperites.hidden` property set to true, then create the renderer,
+    /// then show the window with `video.Window.show()`.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    ///
+    /// ## Code Examples
+    /// TODO: ADD EXAMPLE!!!
+    pub fn initWithProperties(
+        props: CreateProperties,
+    ) !struct { window: Window, properties: properties.Group } {
+        const group = try props.toProperties();
+        errdefer group.deinit();
+
+        const window = try errors.wrapNull(*C.SDL_Window, C.SDL_CreateWindowWithProperties(group.value));
+        return .{ .window = window, .properties = group };
+    }
+
     /// Get the SDL surface associated with the window.
     pub fn getSurface(
         self: Window,
@@ -431,16 +1095,6 @@ pub const Window = packed struct {
         );
         if (!ret)
             return error.SdlError;
-    }
-
-    /// Destroy a window.
-    pub fn deinit(
-        self: Window,
-    ) void {
-        const ret = C.SDL_DestroyWindow(
-            self.value,
-        );
-        _ = ret;
     }
 };
 
@@ -569,6 +1223,113 @@ pub const WindowFlags = struct {
     }
 };
 
+/// Prevent the screen from being blanked by a screen saver.
+///
+/// ## Remarks
+/// If you disable the screensaver, it is automatically re-enabled when SDL quits.
+///
+/// The screensaver is disabled by default, but this may by changed by `hints.Type.allow_screensaver`.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn disableScreenSaver() !void {
+    const ret = C.SDL_DisableScreenSaver();
+    return errors.wrapCallBool(ret);
+}
+
+/// Allow the screen to be blanked by a screen saver.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn enableScreenSaver() !void {
+    const ret = C.SDL_EnableScreenSaver();
+    return errors.wrapCallBool(ret);
+}
+
+/// Get the name of the currently initialized video driver.
+///
+/// ## Return Value
+/// Returns the name of the current video driver or `null` if no driver has been initialized.
+///
+/// ## Remarks
+/// The names of drivers are all simple, low-ASCII identifiers, like "cocoa", "x11" or "windows".
+/// These never have Unicode characters, and are not meant to be proper names.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn getCurrentDriverName() ?[]const u8 {
+    const ret = C.SDL_GetCurrentVideoDriver();
+    return errors.wrapCallCString(ret) catch null;
+}
+
+/// Get the display containing a point.
+///
+/// ## Function Parameters
+/// * `point`: The point to query.
+///
+/// ## Return Value
+/// Returns the display containing the point.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn getDisplayForPoint(point: rect.IPoint) !Display {
+    const c_point = point.toSdl();
+    const ret = C.SDL_GetDisplayForPoint(&c_point);
+    return .{ .value = try errors.wrapCall(C.SDL_DisplayID, ret, 0) };
+}
+
+/// Get the display primarily containing a rect.
+///
+/// ## Function Parameters
+/// * `space`: The rect to query.
+///
+/// ## Return Value
+/// Returns the display containing the rect.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn getDisplayForRect(space: rect.IRect) !Display {
+    const c_rect = space.toSdl();
+    const ret = C.SDL_GetDisplayForRect(&c_rect);
+    return .{ .value = try errors.wrapCall(C.SDL_DisplayID, ret, 0) };
+}
+
+/// Get the display associated with a window.
+///
+/// ## Function Parameters
+/// * `window`: The window to query.
+///
+/// ## Return Value
+/// Returns the display containing the center of the window.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+///
+/// ## Code Examples
+/// TODO!!!
+pub fn getDisplayForWindow(window: Window) !Display {
+    const ret = C.SDL_GetDisplayForWindow(window.value);
+    return .{ .value = try errors.wrapCall(C.SDL_DisplayID, ret, 0) };
+}
+
 /// Get the number of video drivers compiled into SDL.
 pub fn getNumDrivers() u31 {
     const ret = C.SDL_GetNumVideoDrivers();
@@ -587,14 +1348,6 @@ pub fn getDriverName(
     return std.mem.span(ret);
 }
 
-/// Get the name of the currently initialized video driver.
-pub fn getCurrentDriverName() ?[]const u8 {
-    const ret = C.SDL_GetCurrentVideoDriver();
-    if (ret == null)
-        return null;
-    return std.mem.span(ret);
-}
-
 /// Get the current system theme.
 pub fn getSystemTheme() ?SystemTheme {
     const ret = C.SDL_GetSystemTheme();
@@ -608,4 +1361,25 @@ test "Video" {
     // Window.createPopup
     // Window.init
     // Window.initWithProperties
+    // Window.deinit
+    // Window.destroySurface
+    // disableScreensaver
+    // egl.getCurrentConfig
+    // egl.getCurrentDisplay
+    // egl.getProcAddress
+    // egl.getWindowSurface
+    // egl.setAttributeCallbacks
+    // enableScreenSaver
+    // Window.flash
+    // Display.getClosestFullscreenMode
+    // Display.getCurrentMode
+    // Display.getCurrentOrientation
+    // getCurrentDriverName
+    // Display.getDesktopMode
+    // Display.getBounds
+    // getDisplayForPoint
+    // getDisplayForRect
+    // getDisplayForWindow
+    // Display.getName
+    // Display.getProperties
 }

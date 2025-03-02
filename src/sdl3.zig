@@ -102,6 +102,7 @@ pub const properties = @import("properties.zig");
 pub const render = @import("render.zig");
 pub const Scancode = @import("scancode.zig").Scancode;
 pub const sensor = @import("sensor.zig");
+pub const stdinc = @import("stdinc.zig");
 pub const surface = @import("surface.zig");
 pub const time = @import("time.zig");
 pub const timer = @import("timer.zig");

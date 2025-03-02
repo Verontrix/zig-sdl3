@@ -36,8 +36,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     const main_callbacks = b.option(bool, "callbacks", "Enable SDL callbacks rather than use a main function") orelse false;
-    if (main_callbacks)
-    {
+    if (main_callbacks) {
         sdl3.addCSourceFile(.{ .file = b.path("main_callbacks.c") });
     }
     const extension_options = b.addOptions();
@@ -50,28 +49,9 @@ pub fn build(b: *std.Build) !void {
         sdl3.linkLibrary(sdl_image_lib);
     }
 
-
     _ = setupTest(b, cfg, extension_options);
     _ = try setupExamples(b, sdl3, cfg);
     _ = try runExample(b, sdl3, cfg);
-}
-
-pub fn generateBindings(b: *std.Build, cfg: std.Build.TestOptions) *std.Build.Step {
-    const exp = b.step("bindings", "Generate bindings for SDL3");
-    const exe = b.addExecutable(.{
-        .name = "generate-bindings",
-        .target = cfg.target orelse b.standardTargetOptions(.{}),
-        .optimize = cfg.optimize,
-        .root_source_file = b.path("generate.zig"),
-        .version = cfg.version,
-    });
-    const ymlz = b.dependency("ymlz", .{});
-    exe.root_module.addImport("ymlz", ymlz.module("root"));
-    b.installArtifact(exe);
-    const run = b.addRunArtifact(exe);
-    run.step.dependOn(b.getInstallStep());
-    exp.dependOn(&run.step);
-    return exp;
 }
 
 pub fn setupExample(b: *std.Build, sdl3: *std.Build.Module, cfg: std.Build.TestOptions, name: []const u8) !*std.Build.Step.Compile {
@@ -116,6 +96,12 @@ pub fn setupExamples(b: *std.Build, sdl3: *std.Build.Module, cfg: std.Build.Test
 pub fn setupTest(b: *std.Build, cfg: std.Build.TestOptions, extension_options: *std.Build.Step.Options) *std.Build.Step.Compile {
     const tst = b.addTest(cfg);
     tst.root_module.addOptions("extension_options", extension_options);
+    const sdl_dep = b.dependency("sdl", .{
+        .target = cfg.target orelse b.standardTargetOptions(.{}),
+        .optimize = cfg.optimize,
+    });
+    const sdl_dep_lib = sdl_dep.artifact("SDL3");
+    tst.linkLibrary(sdl_dep_lib);
     const tst_run = b.addRunArtifact(tst);
     const tst_step = b.step("test", "Run all tests");
     tst_step.dependOn(&tst_run.step);
