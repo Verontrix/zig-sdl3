@@ -7,6 +7,7 @@ For monitoring how close various subsystems are to completion.
 * Errors
 * Init
 * Log
+* Metal
 * Properties
 * Version
 
@@ -50,7 +51,6 @@ For monitoring how close various subsystems are to completion.
 * Haptic
 * HID
 * Main
-* Metal
 * Mouse
 * Open GL (All variants)
 * Storage

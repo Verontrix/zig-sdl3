@@ -7,6 +7,36 @@ pub const audio = @import("audio.zig");
 /// However, setting callbacks should work fine.
 pub const assert = @import("assert.zig");
 pub const blend_mode = @import("blend_mode.zig");
+
+/// Video capture for the SDL library.
+///
+/// This API lets apps read input from video sources, like webcams.
+/// Camera devices can be enumerated, queried, and opened.
+/// Once opened, it will provide `surface.Surface` objects as new frames of video come in.
+/// These surfaces can be uploaded to an `render.Texture` or processed as pixels in memory.
+///
+/// Several platforms will alert the user if an app tries to access a camera,
+/// and some will present a UI asking the user if your application should be allowed to obtain images at all, which they can deny.
+/// A successfully opened camera will not provide images until permission is granted.
+/// Applications, after opening a camera device, can see if they were granted access by either polling with the `camera.Camera.getPermissionState()` function,
+/// or waiting for an `event.Event.camera_device_approved` or `event.Event.camera_device_denied` event.
+/// Platforms that don't have any user approval process will report approval immediately.
+///
+/// Note that SDL cameras only provide video as individual frames; they will not provide full-motion video encoded in a movie file format,
+/// although an app is free to encode the acquired frames into any format it likes.
+/// It also does not provide audio from the camera hardware through this API; not only do many webcams not have microphones at all,
+/// many people--from streamers to people on Zoom calls--will want to use a separate microphone regardless of the camera.
+/// In any case, recorded audio will be available through SDL's audio API no matter what hardware provides the microphone.
+///
+/// ## Camera Gotchas
+/// Consumer-level camera hardware tends to take a little while to warm up, once the device has been opened.
+/// Generally most camera apps have some sort of UI to take a picture (a button to snap a pic while a preview is showing,
+/// some sort of multi-second countdown for the user to pose, like a photo booth), which puts control in the users' hands,
+/// or they are intended to stay on for long times (Pokemon Go, etc).
+///
+/// It's not uncommon that a newly-opened camera will provide a couple of completely black frames, maybe followed by some under-exposed images.
+/// If taking a single frame automatically, or recording video from a camera's input without the user initiating it from a preview,
+/// it could be wise to drop the first several frames (if not the first several seconds worth of frames!) before using images from a camera.
 pub const camera = @import("camera.zig");
 pub const clipboard = @import("clipboard.zig");
 
@@ -85,6 +115,12 @@ pub const Locale = @import("locale.zig").Locale;
 /// Each log call is atomic, so you won't see log messages cut off one another when logging from multiple threads.
 pub const log = @import("log.zig");
 pub const message_box = @import("message_box.zig");
+
+/// Functions to creating Metal layers and views on SDL windows.
+///
+/// This provides some platform-specific glue for Apple platforms.
+/// Most macOS and iOS apps can use SDL without these functions, but this API they can be useful for specific OS-level integration tasks.
+pub const MetalView = @import("metal.zig").View;
 pub const openURL = @import("misc.zig").openURL;
 pub const pen = @import("pen.zig");
 pub const pixels = @import("pixels.zig");
