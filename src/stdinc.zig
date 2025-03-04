@@ -73,6 +73,25 @@ pub const MallocFunc = *const fn (size: usize) callconv(.C) ?*anyopaque;
 /// This datatype is available since SDL 3.2.0.
 pub const ReallocFunc = *const fn (mem: ?*anyopaque, size: usize) callconv(.C) ?*anyopaque;
 
+/// Free allocated memory.
+///
+/// ## Function Parameters
+/// * `mem`: A pointer to allocated memory, or `null`.
+///
+/// ## Remarks
+/// The pointer is no longer valid after this call and cannot be dereferenced anymore.
+///
+/// If mem is `null`, this function does nothing.
+///
+/// ## Thread Safety
+/// It is safe to call this function from any thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn free(mem: ?*anyopaque) void {
+    return C.SDL_free(mem);
+}
+
 /// Get the original set of SDL memory functions.
 ///
 /// ## Return Value
@@ -89,17 +108,17 @@ pub const ReallocFunc = *const fn (mem: ?*anyopaque, size: usize) callconv(.C) ?
 /// ## Version
 /// This function is available since SDL 3.2.0.
 pub fn getOriginalMemoryFunctions() struct { malloc: MallocFunc, calloc: CallocFunc, realloc: ReallocFunc, free: FreeFunc } {
-    var malloc: ?MallocFunc = undefined;
-    var calloc: ?CallocFunc = undefined;
-    var realloc: ?ReallocFunc = undefined;
-    var free: ?FreeFunc = undefined;
+    var malloc_fn: ?MallocFunc = undefined;
+    var calloc_fn: ?CallocFunc = undefined;
+    var realloc_fn: ?ReallocFunc = undefined;
+    var free_fn: ?FreeFunc = undefined;
     C.SDL_GetOriginalMemoryFunctions(
-        &malloc,
-        &calloc,
-        &realloc,
-        &free,
+        &malloc_fn,
+        &calloc_fn,
+        &realloc_fn,
+        &free_fn,
     );
-    return .{ .malloc = malloc.?, .calloc = calloc.?, .realloc = realloc.?, .free = free.? };
+    return .{ .malloc = malloc_fn.?, .calloc = calloc_fn.?, .realloc = realloc_fn.?, .free = free_fn.? };
 }
 
 /// Replace SDL's memory allocation functions with the original ones.
@@ -136,16 +155,16 @@ pub fn restoreMemoryFunctions() !void {
 /// ## Version
 /// This function is available since SDL 3.2.0.
 pub fn setMemoryFunctions(
-    malloc: MallocFunc,
-    calloc: CallocFunc,
-    realloc: ReallocFunc,
-    free: FreeFunc,
+    malloc_fn: MallocFunc,
+    calloc_fn: CallocFunc,
+    realloc_fn: ReallocFunc,
+    free_fn: FreeFunc,
 ) !void {
     const ret = C.SDL_SetMemoryFunctions(
-        malloc,
-        calloc,
-        realloc,
-        free,
+        malloc_fn,
+        calloc_fn,
+        realloc_fn,
+        free_fn,
     );
     return errors.wrapCallBool(ret);
 }

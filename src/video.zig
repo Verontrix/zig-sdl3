@@ -7,8 +7,13 @@ const std = @import("std");
 const surface = @import("surface.zig");
 
 /// System theme.
+///
+/// ## Version
+/// This enum is available since SDL 3.2.0.
 pub const SystemTheme = enum(c_uint) {
+    /// Light colored theme.
     Light = C.SDL_SYSTEM_THEME_LIGHT,
+    /// Dark colored theme.
     Dark = C.SDL_SYSTEM_THEME_DARK,
 };
 
@@ -42,6 +47,26 @@ pub const Display = packed struct {
             };
         }
     };
+
+    /// Get a list of currently connected displays.
+    ///
+    /// ## Return Value
+    /// Returns a pointer of display items that will be terminated by a value of 0.
+    /// Return value must be freed with `stdinc.free()`.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    ///
+    /// ## Code Examples
+    /// TODO!!!
+    pub fn getAll() ![*:0]Display {
+        var count: c_int = undefined;
+        const ret = try errors.wrapCallCPtr(C.SDL_DisplayID, C.SDL_GetDisplays(&count));
+        return @as([*:0]Display, ret);
+    }
 
     /// Get the desktop area represented by a display.
     ///
@@ -219,6 +244,42 @@ pub const Display = packed struct {
         return DisplayMode.fromSdl(val.*);
     }
 
+    /// Get a list of fullscreen display modes available on a display.
+    ///
+    /// ## Function Parameter
+    /// * `self`: The display to query.
+    /// * `allocator`: Allocator used to allocator the display modes.
+    ///
+    /// ## Return Value
+    /// Returns a slice of display modes, this needs to be freed.
+    ///
+    /// ## Remarks
+    /// The display modes are sorted in this priority:.
+    /// * Width -> Largest to smallest.
+    /// * Height -> Largest to smallest.
+    /// * Bits per pixel -> More colors to fewer colors.
+    /// * Packed pixel layout -> Largest to smallest.
+    /// * Refresh rate -> Highest to lowest.
+    /// * Pixel density -> Lowest to highest.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getFullscreenModes(
+        self: Display,
+        allocator: std.mem.Allocator,
+    ) ![]DisplayMode {
+        var count: c_int = undefined;
+        const val = try errors.wrapCallCPtr([*c]C.SDL_DisplayMode, C.SDL_GetFullscreenDisplayModes(self.value, &count));
+        var ret = try allocator.alloc(DisplayMode, @intCast(count));
+        for (0..count) |ind| {
+            ret[ind] = DisplayMode.fromSdl(val[ind].*);
+        }
+        return ret;
+    }
+
     /// Get the name of a display in UTF-8 encoding.
     ///
     /// ## Function Parameters
@@ -244,6 +305,45 @@ pub const Display = packed struct {
         return try errors.wrapCallCString(ret);
     }
 
+    /// Get the orientation of a display when it is unrotated.
+    ///
+    /// ## Function Parameters
+    /// * `self` - The display to query.
+    ///
+    /// ## Return Value
+    /// Returns the display orientation value enum of the display.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getNaturalOrientation(
+        self: Display,
+    ) ?DisplayOrientation {
+        const ret = C.SDL_GetNaturalDisplayOrientation(
+            self.value,
+        );
+        if (ret == C.SDL_ORIENTATION_UNKNOWN)
+            return null;
+        return @enumFromInt(ret);
+    }
+
+    /// Return the primary display.
+    ///
+    /// ## Return Value
+    /// Returns the primary display.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getPrimaryDisplay() !Display {
+        const ret = C.SDL_GetPrimaryDisplay();
+        return Display{ .value = try errors.wrapCall(C.SDL_DisplayID, ret, 0) };
+    }
+
     /// Get the properties associated with a display.
     ///
     /// ## Function Parameters
@@ -267,15 +367,25 @@ pub const Display = packed struct {
         return Properties.fromSdl(properties.Group{ .value = try errors.wrapCall(C.SDL_PropertiesID, ret, 0) });
     }
 
-    /// Return the primary display.
-    pub fn getPrimaryDisplay() !Display {
-        const ret = C.SDL_GetPrimaryDisplay();
-        if (ret == 0)
-            return error.SdlError;
-        return Display{ .value = ret };
-    }
-
     /// Get the usable desktop area represented by a display, in screen coordinates.
+    ///
+    /// ## Function Parameters
+    /// * `self`: The display to query.
+    ///
+    /// ## Return Value
+    /// The rectangle filled in with the display bounds.
+    ///
+    /// ## Remarks
+    /// This is the same area as `video.Display.getBounds()` reports, but with portions reserved by the system removed.
+    /// For example, on Apple's macOS, this subtracts the area occupied by the menu bar and dock.
+    ///
+    /// Setting a window to be fullscreen generally bypasses these unusable areas, so these are good guidelines for the maximum space available to a non-fullscreen window.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
     pub fn getUsableBounds(
         self: Display,
     ) !rect.IRect {
@@ -284,35 +394,8 @@ pub const Display = packed struct {
             self.value,
             &area,
         );
-        if (!ret)
-            return error.SdlError;
-        return ret.fromSdl();
-    }
-
-    /// Get the orientation of a display when it is unrotated.
-    pub fn getNaturalOrientation(
-        self: Display,
-    ) ?DisplayOrientation {
-        const ret = C.SDL_GetNaturalDisplayOrientation(
-            self.value,
-        );
-        if (ret == C.SDL_ORIENTATION_UNKNOWN)
-            return null;
-        return @enumFromInt(ret);
-    }
-
-    /// Get a list of currently connected displays.
-    pub fn getAll(allocator: std.mem.Allocator) ![]Display {
-        var count: c_int = undefined;
-        const ret = C.SDL_GetDisplays(&count);
-        if (ret == null)
-            return error.SdlError;
-        defer C.SDL_free(ret);
-        const converted_ret = try allocator.alloc(Display, @intCast(count));
-        for (0..count) |index| {
-            converted_ret[index].value = ret[index];
-        }
-        return converted_ret;
+        try errors.wrapCallBool(ret);
+        return rect.IRect.fromSdl(area);
     }
 };
 
@@ -1060,6 +1143,20 @@ pub const Window = packed struct {
         return .{ .window = window, .properties = group };
     }
 
+    /// Get the window that currently has an input grab enabled.
+    ///
+    /// ## Return Value
+    /// Returns the window if input is grabbed or `null` otherwise.
+    ///
+    /// ## Thread Safety
+    /// This function should only be called on the main thread.
+    ///
+    /// ## Version
+    /// This function is available since SDL 3.2.0.
+    pub fn getGrabbed() ?Window {
+        return .{ .value = C.SDL_GetGrabbedWindow() orelse return null };
+    }
+
     /// Get the SDL surface associated with the window.
     pub fn getSurface(
         self: Window,
@@ -1268,7 +1365,9 @@ pub fn enableScreenSaver() !void {
 /// This function is available since SDL 3.2.0.
 pub fn getCurrentDriverName() ?[]const u8 {
     const ret = C.SDL_GetCurrentVideoDriver();
-    return errors.wrapCallCString(ret) catch null;
+    if (ret) |val|
+        return std.mem.span(val);
+    return null;
 }
 
 /// Get the display containing a point.
@@ -1331,9 +1430,35 @@ pub fn getDisplayForWindow(window: Window) !Display {
 }
 
 /// Get the number of video drivers compiled into SDL.
-pub fn getNumDrivers() u31 {
+///
+/// ## Return Value
+/// Returns the number of built in video drivers.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn getNumDrivers() usize {
     const ret = C.SDL_GetNumVideoDrivers();
     return @intCast(ret);
+}
+
+/// Get the current system theme.
+///
+/// ## Return Value
+/// Returns the current system theme, light, dark, or unknown.
+///
+/// ## Thread Safety
+/// This function should only be called on the main thread.
+///
+/// ## Version
+/// This function is available since SDL 3.2.0.
+pub fn getSystemTheme() ?SystemTheme {
+    const ret = C.SDL_GetSystemTheme();
+    if (ret == C.SDL_SYSTEM_THEME_UNKNOWN)
+        return null;
+    return @enumFromInt(ret);
 }
 
 /// Get the name of a built in video driver.
@@ -1346,14 +1471,6 @@ pub fn getDriverName(
     if (ret == null)
         return null;
     return std.mem.span(ret);
-}
-
-/// Get the current system theme.
-pub fn getSystemTheme() ?SystemTheme {
-    const ret = C.SDL_GetSystemTheme();
-    if (ret == C.SDL_SYSTEM_THEME_UNKNOWN)
-        return null;
-    return @enumFromInt(ret);
 }
 
 // Tests for the video subsystem.
@@ -1382,4 +1499,13 @@ test "Video" {
     // getDisplayForWindow
     // Display.getName
     // Display.getProperties
+    // Display.getAll
+    // Display.getUsableBounds
+    // Display.getFullscreenModes
+    // Window.getGrabbed
+    // Display.getNaturalOrientation
+    // getNumDrivers
+    // Display.getPrimaryDisplay
+    // getSystemTheme
+    // getVideoDriver
 }

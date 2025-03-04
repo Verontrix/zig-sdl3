@@ -3,6 +3,7 @@ For monitoring how close various subsystems are to completion.
 
 ## Done
 * Assert
+* Camera
 * Errors
 * Init
 * Log
@@ -17,7 +18,6 @@ For monitoring how close various subsystems are to completion.
 
 ## Needs Testing
 * Blend Mode
-* Camera
 * Clipboard
 * GUID
 * Keycode
