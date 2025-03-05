@@ -1,13 +1,14 @@
 # Checklist
 For monitoring how close various subsystems are to completion.
 
-## Done
+## Done (9/57)
 * Assert
 * Camera
 * Errors
 * Init
 * Log
 * Metal
+* Misc
 * Properties
 * Version
 
@@ -15,7 +16,6 @@ For monitoring how close various subsystems are to completion.
 * Hints (Needs extra hints)
 * IO Stream
 * Message Box
-* Misc
 
 ## Needs Testing
 * Blend Mode
