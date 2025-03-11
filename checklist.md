@@ -14,10 +14,7 @@ For monitoring how close various subsystems are to completion.
 * Main
 * Metal
 * Misc
-* Properties
 * Shared Object/Loadso
-* Version
-* Vulkan
 
 ## Done?
 * Hints (Needs extra hints)

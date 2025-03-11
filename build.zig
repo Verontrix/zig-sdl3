@@ -23,6 +23,13 @@ pub fn build(b: *std.Build) !void {
     });
     const sdl_dep_lib = sdl_dep.artifact("SDL3");
 
+    const sdl_image_dep = b.dependency("sdl_image", .{
+        .target = target,
+        .optimize = optimize,
+        //TODO add options here...
+    });
+    const sdl_image_lib = sdl_image_dep.artifact("SDL3_image");
+
     const sdl3 = b.addModule("sdl3", .{
         .root_source_file = cfg.root_source_file,
         .target = target,
@@ -39,7 +46,7 @@ pub fn build(b: *std.Build) !void {
     sdl3.addOptions("extension_options", extension_options);
     sdl3.linkLibrary(sdl_dep_lib);
     if (ext_image) {
-        sdl3.linkSystemLibrary("SDL3_image", .{});
+        sdl3.linkLibrary(sdl_image_lib);
     }
 
     _ = setupTest(b, cfg, extension_options);
