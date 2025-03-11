@@ -147,6 +147,18 @@ pub const timer = @import("timer.zig");
 pub const Version = @import("version.zig").Version;
 pub const video = @import("video.zig");
 
+/// Functions for creating Vulkan surfaces on SDL windows.
+///
+/// For the most part, Vulkan operates independent of SDL, but it benefits from a little support during setup.
+///
+/// Use `vulkan.getInstanceExtensions()` to get platform-specific bits for creating a `vulkan.Instance`,
+/// then `vulkan.getVkGetInstanceProcAddr()` to get the appropriate function for querying Vulkan entry points.
+/// Then `vulkan.Surface.init()` will get you the final pieces you need to prepare for rendering into a `video.Window` with Vulkan.
+///
+/// Unlike OpenGL, most of the details of "context" creation and window buffer swapping are handled by the Vulkan API directly,
+/// so SDL doesn't provide Vulkan equivalents of `video.gl.swapWindow()`, etc; they aren't necessary.
+pub const vulkan = @import("vulkan.zig");
+
 pub const Stream = @import("io_stream.zig").Stream;
 pub const rect = @import("rect.zig");
 

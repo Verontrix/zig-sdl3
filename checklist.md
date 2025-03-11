@@ -1,7 +1,7 @@
 # Checklist
 For monitoring how close various subsystems are to completion.
 
-## Done (9/57)
+## Done (10/57)
 * Assert
 * Camera
 * Errors
@@ -11,6 +11,7 @@ For monitoring how close various subsystems are to completion.
 * Misc
 * Properties
 * Version
+* Vulkan
 
 ## Done?
 * Hints (Needs extra hints)
@@ -56,7 +57,6 @@ For monitoring how close various subsystems are to completion.
 * Storage
 * System
 * Touch
-* Vulkan
 
 ## Not Applicable
 * Atomics (Zig has this already)
